@@ -9,14 +9,15 @@ import config
 
 
 def apply_atmospheric_correction(band_data: Dict[str, np.ndarray], 
-                               cloud_mask: np.ndarray,
+                               cloud_mask: Optional[np.ndarray] = None,
                                percentile: float = None) -> Dict[str, np.ndarray]:
     """
-    Apply Cloud-Optimized Dark Object Subtraction (CO-DOS) atmospheric correction.
+    Apply Dark Object Subtraction (DOS) atmospheric correction.
+    Can use cloud mask if available, otherwise applies simple DOS on all pixels.
     
     Args:
         band_data (dict): Dictionary of band_name -> array
-        cloud_mask (np.ndarray): Binary cloud mask (True = cloud)
+        cloud_mask (np.ndarray, optional): Binary cloud mask (True = cloud). If None, uses all pixels
         percentile (float): Percentile for dark object detection (default: config.DOS_PERCENTILE)
         
     Returns:
@@ -25,17 +26,6 @@ def apply_atmospheric_correction(band_data: Dict[str, np.ndarray],
     
     if percentile is None:
         percentile = config.DOS_PERCENTILE
-    
-    # Create cloud-free pixel mask
-    cloud_free_mask = ~cloud_mask
-    
-    # Check if we have enough cloud-free pixels
-    cloud_free_pixels = np.sum(cloud_free_mask)
-    total_pixels = cloud_mask.size
-    cloud_free_ratio = cloud_free_pixels / total_pixels
-    
-    if cloud_free_ratio < 0.1:  # Less than 10% cloud-free
-        print(f"Warning: Only {cloud_free_ratio:.1%} cloud-free pixels available for correction")
     
     corrected_bands = {}
     
@@ -47,16 +37,28 @@ def apply_atmospheric_correction(band_data: Dict[str, np.ndarray],
             
         band_array = band_data[band_name].copy()
         
-        # Extract cloud-free pixels for dark object calculation
-        cloud_free_pixels = band_array[cloud_free_mask]
+        # Select pixels for dark object calculation
+        if cloud_mask is not None:
+            # Use cloud-free pixels if cloud mask is available
+            cloud_free_mask = ~cloud_mask
+            dark_object_pixels = band_array[cloud_free_mask]
+            
+            # Check if we have enough cloud-free pixels
+            cloud_free_ratio = np.sum(cloud_free_mask) / cloud_mask.size
+            if cloud_free_ratio < 0.1:  # Less than 10% cloud-free
+                print(f"Warning: Only {cloud_free_ratio:.1%} cloud-free pixels available for {band_name}")
+        else:
+            # Use all valid (non-zero) pixels if no cloud mask
+            valid_mask = band_array > 0
+            dark_object_pixels = band_array[valid_mask]
         
-        if len(cloud_free_pixels) == 0:
-            print(f"Warning: No cloud-free pixels for band {band_name}, skipping correction")
-            corrected_bands[band_name] = band_array / config.REFLECTANCE_SCALE
+        if len(dark_object_pixels) == 0:
+            print(f"Warning: No valid pixels for band {band_name}, applying scale factor only")
+            corrected_bands[band_name] = (band_array / config.REFLECTANCE_SCALE).astype(np.float32)
             continue
         
-        # Calculate dark object value (low percentile of cloud-free pixels)
-        dos_value = np.percentile(cloud_free_pixels, percentile * 100)
+        # Calculate dark object value (low percentile of selected pixels)
+        dos_value = np.percentile(dark_object_pixels, percentile * 100)
         
         # Apply dark object subtraction
         corrected = band_array - dos_value

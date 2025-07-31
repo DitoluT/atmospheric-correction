@@ -1,0 +1,18 @@
+PNG Visualization Summary
+==================================================
+
+Scene: test_S2A_MSIL1C_20230731_synthetic
+Cloud Coverage: 0.0%
+Mean Cloud Probability: 0.000
+
+Generated Files:
+  - rgb: test_S2A_MSIL1C_20230731_synthetic_rgb.png
+  - cloud_probability: test_S2A_MSIL1C_20230731_synthetic_cloud_prob.png
+  - cloud_mask: test_S2A_MSIL1C_20230731_synthetic_cloud_mask.png
+  - cloud_overlay: test_S2A_MSIL1C_20230731_synthetic_cloud_overlay.png
+
+File Descriptions:
+  - rgb.png: True color RGB image (gamma corrected)
+  - cloud_prob.png: Cloud probability heatmap (0-100%)
+  - cloud_mask.png: Binary cloud mask (white=clouds)
+  - cloud_overlay.png: RGB with red cloud overlay

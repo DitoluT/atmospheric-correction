@@ -22,11 +22,19 @@ CLOUD_THRESHOLD = 0.4  # Cloud probability threshold
 # Scale factors
 REFLECTANCE_SCALE = 10000  # Sentinel-2 scale factor for reflectance values
 
+# RGB Configuration for True Color Visualization
+RGB_BANDS = ['B04', 'B03', 'B02']  # True color order (Red, Green, Blue)
+
+# Visualization Parameters
+VIS_SCALE = 3000  # Reflectance scaling for RGB visualization
+GAMMA_CORRECTION = 0.5  # Gamma correction for better visual appearance
+
 # File paths
 DATA_DIR = "data"
 CLOUD_MASKS_DIR = "data/cloud_masks"
 CORRECTED_BANDS_DIR = "data/corrected_bands"
 INDICES_DIR = "data/indices"
+VISUALIZATIONS_DIR = "data/visualizations"
 
 # Band indices mapping for quick access
 BAND_INDICES = {band: idx for idx, band in enumerate(ALL_BANDS)}

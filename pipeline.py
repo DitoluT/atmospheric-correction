@@ -9,7 +9,7 @@ import numpy as np
 from typing import Dict, Any, Optional
 from datetime import datetime
 import config
-from utils import reader, cloud_detection, correction, spectral_indices
+from utils import reader, cloud_detection, correction, spectral_indices, visualize
 
 
 def save_outputs(scene_name: str,
@@ -18,7 +18,8 @@ def save_outputs(scene_name: str,
                 cloud_prob: np.ndarray,
                 cloud_mask: np.ndarray,
                 scl: Optional[np.ndarray] = None,
-                metadata: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+                metadata: Optional[Dict[str, Any]] = None,
+                save_png: bool = True) -> Dict[str, str]:
     """
     Save all processing outputs to appropriate directories.
     
@@ -30,6 +31,7 @@ def save_outputs(scene_name: str,
         cloud_mask (np.ndarray): Binary cloud mask
         scl (np.ndarray, optional): Scene classification layer
         metadata (dict, optional): Processing metadata
+        save_png (bool): Whether to generate PNG visualizations
         
     Returns:
         dict: Dictionary of saved file paths
@@ -39,6 +41,8 @@ def save_outputs(scene_name: str,
     os.makedirs(config.CLOUD_MASKS_DIR, exist_ok=True)
     os.makedirs(config.CORRECTED_BANDS_DIR, exist_ok=True)
     os.makedirs(config.INDICES_DIR, exist_ok=True)
+    if save_png:
+        os.makedirs(config.VISUALIZATIONS_DIR, exist_ok=True)
     
     saved_files = {}
     
@@ -98,6 +102,32 @@ def save_outputs(scene_name: str,
             json.dump(metadata, f, indent=2)
         saved_files['metadata'] = metadata_path
     
+    # Generate PNG visualizations
+    if save_png:
+        try:
+            png_files = visualize.save_png_visualizations(
+                corrected_bands=corrected_bands,
+                cloud_prob=cloud_prob,
+                cloud_mask=cloud_mask,
+                output_dir=config.VISUALIZATIONS_DIR,
+                scene_name=scene_name
+            )
+            saved_files.update(png_files)
+            
+            # Create visualization summary
+            if metadata and 'cloud_statistics' in metadata:
+                cloud_stats = metadata['cloud_statistics']
+            else:
+                cloud_stats = {'cloud_coverage_percent': 0, 'mean_cloud_probability': 0}
+            
+            summary_path = visualize.create_visualization_summary(
+                png_files, cloud_stats, config.VISUALIZATIONS_DIR, scene_name
+            )
+            saved_files['visualization_summary'] = summary_path
+            
+        except Exception as e:
+            print(f"Warning: PNG visualization generation failed: {e}")
+    
     return saved_files
 
 
@@ -136,11 +166,37 @@ def process_scene(scene_path: str,
             print(f"  - Loaded {data['metadata']['num_bands']} bands")
             print(f"  - Scene dimensions: {data['metadata']['height']} x {data['metadata']['width']}")
         
-        # Step 2: Generate cloud mask
+        # Step 2: Apply atmospheric correction FIRST
         if verbose:
-            print("Step 2: Generating cloud mask...")
+            print("Step 2: Applying atmospheric correction...")
         
-        cloud_prob, cloud_mask = cloud_detection.generate_cloud_mask(data["maskable_bands"])
+        # Apply DOS correction without cloud mask dependency
+        corrected = correction.apply_atmospheric_correction(data["bands"], cloud_mask=None)
+        
+        if verbose:
+            print(f"  - Corrected {len(corrected)} bands")
+        
+        # Step 3: Generate cloud mask on corrected BOA reflectance
+        if verbose:
+            print("Step 3: Generating cloud mask on corrected reflectance...")
+        
+        # Create corrected band stack for s2cloudless (using corrected reflectance)
+        corrected_maskable_bands = np.zeros(
+            (data['metadata']['height'], data['metadata']['width'], len(config.CLOUD_BANDS)), 
+            dtype=np.float32
+        )
+        for i, band_name in enumerate(config.CLOUD_BANDS):
+            if band_name in corrected:
+                # s2cloudless expects values in [0, 1] range, our corrected bands are already scaled
+                corrected_maskable_bands[:, :, i] = corrected[band_name]
+            else:
+                # Fallback to original scaled data if corrected band not available
+                band_idx = config.BAND_INDICES[band_name]
+                original_band = data['bands'][band_name] / config.REFLECTANCE_SCALE
+                corrected_maskable_bands[:, :, i] = original_band
+        
+        # Generate cloud mask using corrected reflectance
+        cloud_prob, cloud_mask = cloud_detection.generate_cloud_mask(corrected_maskable_bands)
         
         # Get cloud statistics
         cloud_stats = cloud_detection.cloud_coverage_stats(cloud_prob, cloud_mask)
@@ -148,15 +204,6 @@ def process_scene(scene_path: str,
         if verbose:
             print(f"  - Cloud coverage: {cloud_stats['cloud_coverage_percent']:.1f}%")
             print(f"  - Mean cloud probability: {cloud_stats['mean_cloud_probability']:.3f}")
-        
-        # Step 3: Apply atmospheric correction
-        if verbose:
-            print("Step 3: Applying atmospheric correction...")
-        
-        corrected = correction.apply_atmospheric_correction(data["bands"], cloud_mask)
-        
-        if verbose:
-            print(f"  - Corrected {len(corrected)} bands")
         
         # Step 4: Compute spectral indices
         if verbose:
@@ -210,7 +257,8 @@ def process_scene(scene_path: str,
                 print("Step 7: Saving outputs...")
             
             saved_files = save_outputs(
-                output_name, corrected, main_indices, cloud_prob, cloud_mask, scl, processing_metadata
+                output_name, corrected, main_indices, cloud_prob, cloud_mask, scl, processing_metadata, 
+                save_png=True
             )
             
             if verbose:
